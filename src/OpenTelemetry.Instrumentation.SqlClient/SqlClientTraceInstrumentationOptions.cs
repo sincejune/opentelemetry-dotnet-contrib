@@ -64,6 +64,14 @@ public class SqlClientTraceInstrumentationOptions
     public bool SetDbStatementForText { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether or not the <see
+    /// cref="SqlClientInstrumentation"/> should add the text of commands as
+    /// the <see cref="SemanticConventions.AttributeDbStatement"/> tag.
+    /// Default value: <see langword="false"/>.
+    /// </summary>
+    public bool SetFullPropagationMode { get; set; }
+
+    /// <summary>
     /// Gets or sets an action to enrich an <see cref="Activity"/> with the
     /// raw <c>SqlCommand</c> object.
     /// </summary>

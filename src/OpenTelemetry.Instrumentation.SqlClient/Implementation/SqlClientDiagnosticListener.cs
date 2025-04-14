@@ -26,6 +26,9 @@ internal sealed class SqlClientDiagnosticListener : ListenerHandler
     public const string SqlDataWriteCommandError = "System.Data.SqlClient.WriteCommandError";
     public const string SqlMicrosoftWriteCommandError = "Microsoft.Data.SqlClient.WriteCommandError";
 
+    private const string ContextInfoParameterName = "@ot_trace_context";
+    private const string SetContextCommand = $"set context_info {ContextInfoParameterName}";
+
     private readonly PropertyFetcher<object> commandFetcher = new("Command");
     private readonly PropertyFetcher<object> connectionFetcher = new("Connection");
     private readonly PropertyFetcher<string> dataSourceFetcher = new("DataSource");
@@ -80,6 +83,24 @@ internal sealed class SqlClientDiagnosticListener : ListenerHandler
                         // There is no listener or it decided not to sample the current request.
                         this.beginTimestamp.Value = Stopwatch.GetTimestamp();
                         return;
+                    }
+
+                    if (options.SetFullPropagationMode &&
+                        command is IDbCommand { CommandType: CommandType.Text } iDbCommand &&
+                        iDbCommand.CommandText != SetContextCommand &&
+                        iDbCommand.Connection is { State: ConnectionState.Open })
+                    {
+                        var injectionCommand = iDbCommand.Connection.CreateCommand();
+                        injectionCommand.CommandText = SetContextCommand;
+                        injectionCommand.CommandType = CommandType.Text;
+                        var parameter = injectionCommand.CreateParameter();
+                        parameter.ParameterName = ContextInfoParameterName;
+
+                        // TODO: better convert it
+                        parameter.Value = HexStringToByteArray(activity.TraceId.ToString());
+                        parameter.DbType = DbType.Binary;
+                        injectionCommand.Parameters.Add(parameter);
+                        injectionCommand.ExecuteNonQuery();
                     }
 
                     if (activity.IsAllDataRequested)
@@ -232,6 +253,22 @@ internal sealed class SqlClientDiagnosticListener : ListenerHandler
             default:
                 break;
         }
+    }
+
+    private static byte[] HexStringToByteArray(string hex)
+    {
+        if (hex.Length % 2 != 0)
+        {
+            throw new ArgumentException("Invalid length for a hex string.");
+        }
+
+        byte[] bytes = new byte[hex.Length / 2];
+        for (int i = 0; i < hex.Length; i += 2)
+        {
+            bytes[i / 2] = Convert.ToByte(hex.Substring(i, 2), 16);
+        }
+
+        return bytes;
     }
 
     private void RecordDuration(Activity? activity, object? payload, bool hasError = false)
