@@ -94,7 +94,7 @@ internal sealed class SqlClientDiagnosticListener : ListenerHandler
                     if (options.SetFullPropagationMode &&
                         command is IDbCommand { CommandType: CommandType.Text, Connection.State: ConnectionState.Open } iDbCommand)
                     {
-                        iDbCommand.CommandText = $"/* service.name= {activity.Source.Name} */" + iDbCommand.CommandText;
+                        iDbCommand.CommandText += $" /* service.name= {activity.Source.Name} */";
 
                         var injectionCommand = iDbCommand.Connection.CreateCommand();
                         injectionCommand.CommandText = SetContextCommand;
@@ -103,12 +103,15 @@ internal sealed class SqlClientDiagnosticListener : ListenerHandler
                         parameter.ParameterName = ContextInfoParameterName;
 
                         // TODO: better convert it
-                        var pid = activity.ParentId ?? "00000000";
+                        var pid = activity.ParentId ?? "0000000000000000";
                         var bytes = ConcatenateByteArrays(
-                            HexStringToByteArray("00"),
+                            [0x0],
+                            [0x0],
                             HexStringToByteArray(pid),
+                            [0x1],
                             HexStringToByteArray(activity.TraceId.ToHexString()),
-                            HexStringToByteArray("00"));
+                            [0x2],
+                            [0x0]);
                         parameter.DbType = DbType.Binary;
                         parameter.Value = bytes;
                         injectionCommand.Parameters.Add(parameter);
