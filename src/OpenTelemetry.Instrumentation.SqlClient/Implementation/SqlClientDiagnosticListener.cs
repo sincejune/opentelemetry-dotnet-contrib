@@ -94,7 +94,7 @@ internal sealed class SqlClientDiagnosticListener : ListenerHandler
                     if (options.SetFullPropagationMode &&
                         command is IDbCommand { CommandType: CommandType.Text, Connection.State: ConnectionState.Open } iDbCommand)
                     {
-                        iDbCommand.CommandText += $" /* service.name= {activity.Source.Name} */";
+                        iDbCommand.CommandText += $" /* peer.name= {activity.Source.Name} */";
 
                         var injectionCommand = iDbCommand.Connection.CreateCommand();
                         injectionCommand.CommandText = SetContextCommand;
