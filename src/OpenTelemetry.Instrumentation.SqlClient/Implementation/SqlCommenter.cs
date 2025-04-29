@@ -1,10 +1,11 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Net;
+
 namespace OpenTelemetry.Instrumentation.SqlClient.Implementation;
 
 using System.Collections.Generic;
-using System.Web;
 
 internal sealed class SqlCommenter
 {
@@ -14,8 +15,8 @@ internal sealed class SqlCommenter
 
         foreach (var kvp in parameters)
         {
-            string encodedKey = HttpUtility.UrlEncode(kvp.Key);
-            string encodedValue = HttpUtility.UrlEncode(kvp.Value);
+            string? encodedKey = WebUtility.UrlEncode(kvp.Key);
+            string? encodedValue = WebUtility.UrlEncode(kvp.Value);
             encodedParams.Add($"{encodedKey}={encodedValue}");
         }
 
@@ -26,7 +27,7 @@ internal sealed class SqlCommenter
     {
         if (string.IsNullOrEmpty(encodedParams))
         {
-            return ""; // Or "/* */"
+            return string.Empty; // Or "/* */"
         }
 
         return $"/*{encodedParams}*/";
