@@ -18,6 +18,16 @@ namespace OpenTelemetry.Instrumentation.SqlClient;
 public class SqlClientTraceInstrumentationOptions
 {
     /// <summary>
+    /// Flag to send full trace information from application to SQL Server.
+    /// </summary>
+    internal const string ContextPropagationLevelTrace = "trace";
+
+    /// <summary>
+    /// Flag to disable sending trace information from application to SQL Server.
+    /// </summary>
+    internal const string ContextPropagationDisabled = "disabled";
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="SqlClientTraceInstrumentationOptions"/> class.
     /// </summary>
     public SqlClientTraceInstrumentationOptions()
@@ -30,6 +40,7 @@ public class SqlClientTraceInstrumentationOptions
         var databaseSemanticConvention = GetSemanticConventionOptIn(configuration);
         this.EmitOldAttributes = databaseSemanticConvention.HasFlag(DatabaseSemanticConvention.Old);
         this.EmitNewAttributes = databaseSemanticConvention.HasFlag(DatabaseSemanticConvention.New);
+        this.ContextPropagationLevel = ContextPropagationDisabled;
     }
 
     /// <summary>
@@ -62,6 +73,18 @@ public class SqlClientTraceInstrumentationOptions
     /// </para>
     /// </remarks>
     public bool SetDbStatementForText { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating the amount of information
+    /// passed from application into SQL Server database.
+    /// Optional values:
+    /// <see langword="trace"/>:
+    /// Send full trace information to SQL Server.
+    /// <see langword="disabled"/>:
+    /// Disabled sending information to SQL Server.
+    /// Default value: <see landword="disabled"/>.
+    /// </summary>
+    public string ContextPropagationLevel { get; set; }
 
     /// <summary>
     /// Gets or sets an action to enrich an <see cref="Activity"/> with the
