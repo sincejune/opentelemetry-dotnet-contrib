@@ -53,6 +53,7 @@ public sealed class SqlClientIntegrationTests : IClassFixture<SqlClientIntegrati
             {
                 options.SetDbStatementForText = captureTextCommandContent;
                 options.RecordException = recordException;
+                options.SetFullPropagationMode = true;
                 if (shouldEnrich)
                 {
                     options.Enrich = SqlClientTests.ActivityEnrichment;

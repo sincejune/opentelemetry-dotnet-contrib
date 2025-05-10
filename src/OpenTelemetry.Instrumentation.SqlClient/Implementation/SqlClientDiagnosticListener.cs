@@ -26,6 +26,9 @@ internal sealed class SqlClientDiagnosticListener : ListenerHandler
     public const string SqlDataWriteCommandError = "System.Data.SqlClient.WriteCommandError";
     public const string SqlMicrosoftWriteCommandError = "Microsoft.Data.SqlClient.WriteCommandError";
 
+    private const string ContextInfoParameterName = "@ot_trace_context";
+    private const string SetContextCommand = $"set context_info {ContextInfoParameterName}";
+
     private readonly PropertyFetcher<object> commandFetcher = new("Command");
     private readonly PropertyFetcher<object> connectionFetcher = new("Connection");
     private readonly PropertyFetcher<string> dataSourceFetcher = new("DataSource");
@@ -64,6 +67,12 @@ internal sealed class SqlClientDiagnosticListener : ListenerHandler
                         return;
                     }
 
+                    // skip injection if this is an injected query
+                    if (command is IDbCommand { CommandType: CommandType.Text, CommandText: SetContextCommand })
+                    {
+                        return;
+                    }
+
                     _ = this.connectionFetcher.TryFetch(command, out var connection);
                     _ = this.databaseFetcher.TryFetch(connection, out var databaseName);
                     _ = this.dataSourceFetcher.TryFetch(connection, out var dataSource);
@@ -80,6 +89,33 @@ internal sealed class SqlClientDiagnosticListener : ListenerHandler
                         // There is no listener or it decided not to sample the current request.
                         this.beginTimestamp.Value = Stopwatch.GetTimestamp();
                         return;
+                    }
+
+                    if (options.SetFullPropagationMode &&
+                        command is IDbCommand { CommandType: CommandType.Text, Connection.State: ConnectionState.Open } iDbCommand)
+                    {
+                        iDbCommand.CommandText += $" /* peer.name= {activity.Source.Name} */";
+
+                        var injectionCommand = iDbCommand.Connection.CreateCommand();
+                        injectionCommand.CommandText = SetContextCommand;
+                        injectionCommand.CommandType = CommandType.Text;
+                        var parameter = injectionCommand.CreateParameter();
+                        parameter.ParameterName = ContextInfoParameterName;
+
+                        // TODO: better convert it
+                        var pid = activity.ParentId ?? "0000000000000000";
+                        var bytes = ConcatenateByteArrays(
+                            [0x0],
+                            [0x0],
+                            HexStringToByteArray(pid),
+                            [0x1],
+                            HexStringToByteArray(activity.TraceId.ToHexString()),
+                            [0x2],
+                            [0x0]);
+                        parameter.DbType = DbType.Binary;
+                        parameter.Value = bytes;
+                        injectionCommand.Parameters.Add(parameter);
+                        injectionCommand.ExecuteNonQuery();
                     }
 
                     if (activity.IsAllDataRequested)
@@ -232,6 +268,45 @@ internal sealed class SqlClientDiagnosticListener : ListenerHandler
             default:
                 break;
         }
+    }
+
+    private static byte[] HexStringToByteArray(string hex)
+    {
+        if (hex.Length % 2 != 0)
+        {
+            throw new ArgumentException("Invalid length for a hex string.");
+        }
+
+        byte[] bytes = new byte[hex.Length / 2];
+        for (int i = 0; i < hex.Length; i += 2)
+        {
+            bytes[i / 2] = Convert.ToByte(hex.Substring(i, 2), 16);
+        }
+
+        return bytes;
+    }
+
+    private static byte[] ConcatenateByteArrays(params byte[][] arrays)
+    {
+        // Calculate the total length of the concatenated array
+        int totalLength = 0;
+        foreach (var array in arrays)
+        {
+            totalLength += array.Length;
+        }
+
+        // Create a result array with the total length
+        byte[] result = new byte[totalLength];
+
+        // Copy each array into the result array
+        int currentPosition = 0;
+        foreach (var array in arrays)
+        {
+            Buffer.BlockCopy(array, 0, result, currentPosition, array.Length);
+            currentPosition += array.Length;
+        }
+
+        return result;
     }
 
     private void RecordDuration(Activity? activity, object? payload, bool hasError = false)
