@@ -8,6 +8,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 #endif
 using System.Globalization;
+using System.Text;
 using OpenTelemetry.Trace;
 
 namespace OpenTelemetry.Instrumentation.SqlClient.Implementation;
@@ -25,6 +26,9 @@ internal sealed class SqlClientDiagnosticListener : ListenerHandler
 
     public const string SqlDataWriteCommandError = "System.Data.SqlClient.WriteCommandError";
     public const string SqlMicrosoftWriteCommandError = "Microsoft.Data.SqlClient.WriteCommandError";
+
+    private const string ContextInfoParameterName = "@opentelemetry_traceparent";
+    private const string SetContextSql = $"set context_info {ContextInfoParameterName}";
 
     private readonly PropertyFetcher<object> commandFetcher = new("Command");
     private readonly PropertyFetcher<object> connectionFetcher = new("Connection");
@@ -64,6 +68,13 @@ internal sealed class SqlClientDiagnosticListener : ListenerHandler
                         return;
                     }
 
+                    // skip if this is an injected query
+                    if (options.ContextPropagationLevel == SqlClientTraceInstrumentationOptions.ContextPropagationLevelTrace &&
+                        command is IDbCommand { CommandType: CommandType.Text, CommandText: SetContextSql })
+                    {
+                        return;
+                    }
+
                     _ = this.connectionFetcher.TryFetch(command, out var connection);
                     _ = this.databaseFetcher.TryFetch(connection, out var databaseName);
                     _ = this.dataSourceFetcher.TryFetch(connection, out var dataSource);
@@ -80,6 +91,25 @@ internal sealed class SqlClientDiagnosticListener : ListenerHandler
                         // There is no listener or it decided not to sample the current request.
                         this.beginTimestamp.Value = Stopwatch.GetTimestamp();
                         return;
+                    }
+
+                    if (options.ContextPropagationLevel == SqlClientTraceInstrumentationOptions.ContextPropagationLevelTrace &&
+                        command is IDbCommand { CommandType: CommandType.Text, Connection.State: ConnectionState.Open } iDbCommand)
+                    {
+                        var setContextCommand = iDbCommand.Connection.CreateCommand();
+                        setContextCommand.CommandText = SetContextSql;
+                        setContextCommand.CommandType = CommandType.Text;
+                        var parameter = setContextCommand.CreateParameter();
+                        parameter.ParameterName = ContextInfoParameterName;
+
+                        var tracedflags = (activity.ActivityTraceFlags & ActivityTraceFlags.Recorded) != 0 ? "01" : "00";
+                        var traceparent = $"00-{activity.TraceId.ToHexString()}-{activity.SpanId.ToHexString()}-{tracedflags}";
+
+                        parameter.DbType = DbType.Binary;
+                        parameter.Value = Encoding.UTF8.GetBytes(traceparent);
+                        setContextCommand.Parameters.Add(parameter);
+
+                        setContextCommand.ExecuteNonQuery();
                     }
 
                     if (activity.IsAllDataRequested)
@@ -125,6 +155,26 @@ internal sealed class SqlClientDiagnosticListener : ListenerHandler
                                     break;
 
                                 case CommandType.Text:
+                                    // This section is not for production use. DEMO only
+                                    if (options.ContextPropagationLevel == SqlClientTraceInstrumentationOptions
+                                            .ContextPropagationLevelTrace &&
+                                        command is IDbCommand and not
+                                        {
+                                            CommandText: SetContextSql
+                                        })
+                                    {
+                                        var idbCommand = (IDbCommand)command;
+
+                                        // TODO: this service name is not correct, to fix it with correct one.
+                                        var serviceName = options.ServiceName ?? "UnknownService";
+                                        Dictionary<string, string> params4 = new Dictionary<string, string> { { "service.name", serviceName } };
+                                        string encoded = SqlCommenter.EncodeParams(params4);
+                                        string comment = SqlCommenter.CreateComment(encoded);
+
+                                        // TODO: we need to check if the command text is already set with a comment.
+                                        idbCommand.CommandText = $"{comment} {idbCommand.CommandText}";
+                                    }
+
                                     if (options.SetDbStatementForText)
                                     {
                                         var sqlStatementInfo = SqlProcessor.GetSanitizedSql(commandText);
@@ -168,6 +218,15 @@ internal sealed class SqlClientDiagnosticListener : ListenerHandler
             case SqlDataAfterExecuteCommand:
             case SqlMicrosoftAfterExecuteCommand:
                 {
+                    _ = this.commandFetcher.TryFetch(payload, out var command);
+
+                    // skip if this is an injected query
+                    if (options.ContextPropagationLevel == SqlClientTraceInstrumentationOptions.ContextPropagationLevelTrace &&
+                        command is IDbCommand { CommandType: CommandType.Text, CommandText: SetContextSql })
+                    {
+                        return;
+                    }
+
                     if (activity == null)
                     {
                         SqlClientInstrumentationEventSource.Log.NullActivity(name);
@@ -189,6 +248,15 @@ internal sealed class SqlClientDiagnosticListener : ListenerHandler
             case SqlDataWriteCommandError:
             case SqlMicrosoftWriteCommandError:
                 {
+                    _ = this.commandFetcher.TryFetch(payload, out var command);
+
+                    // skip if this is an injected query
+                    if (options.ContextPropagationLevel == SqlClientTraceInstrumentationOptions.ContextPropagationLevelTrace &&
+                        command is IDbCommand { CommandType: CommandType.Text, CommandText: SetContextSql })
+                    {
+                        return;
+                    }
+
                     if (activity == null)
                     {
                         SqlClientInstrumentationEventSource.Log.NullActivity(name);

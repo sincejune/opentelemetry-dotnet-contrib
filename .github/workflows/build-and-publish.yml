@@ -1,0 +1,31 @@
+name: Build and Publish
+
+on:
+  pull_request:
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4 # v4.2.2
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4 # v4.3.1
+      with:
+        dotnet-version: '9.0.x'
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build solution
+      run: dotnet build --configuration Release --no-restore
+
+    - name: Publish to GitHub Packages
+      run: |
+        dotnet nuget add source --username sincejune --password ${{ secrets.GITHUB_TOKEN }} --store-password-in-clear-text --name github "https://nuget.pkg.github.com/sincejune/index.json"
+        dotnet pack --configuration Release || true
+        dotnet nuget push 'src/OpenTelemetry.Instrumentation.SqlClient/bin/Release/OpenTelemetry.Instrumentation.SqlClient.0.0.0-alpha.0.nupkg' --source github
